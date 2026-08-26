@@ -946,11 +946,18 @@ function bookingLink(dest,checkin,checkout,guests){
 function agodaLink(dest,checkin,checkout,guests){
   let u=`https://www.agoda.com/search?query=${encodeURIComponent(dest)}&adults=${guests||2}`;
   if(checkin)u+=`&checkIn=${checkin}`;
-  if(checkout)u+=`&checkOut=${checkout}`;
+  // Agoda's search page uses check-in date + length-of-stay (nights), not a
+  // checkout date pair like Booking.com — compute nights when both dates exist.
+  if(checkin&&checkout){
+    const nights=Math.max(1,Math.round((new Date(checkout)-new Date(checkin))/86400000));
+    u+=`&los=${nights}`;
+  }
   return u;
 }
-function klookLink(dest){
-  return `https://www.klook.com/th/search/result/?keyword=${encodeURIComponent(dest+' car rental')}`;
+function klookLink(dest,date){
+  let u=`https://www.klook.com/th/search/result/?keyword=${encodeURIComponent(dest+' car rental')}`;
+  if(date)u+=`&date=${date}`; // best-effort — Klook's search may not honor this, hence the visible date label next to the link
+  return u;
 }
 function go12Link(from,to,date){
   let u=`https://12go.asia/th?query=${encodeURIComponent((to||from||''))}`;
@@ -1252,12 +1259,12 @@ function renderTrip(trip){
           <div class="day-transit-items">
             ${d.transit.map(t=>{
               const dayDate=addDays(startD,(d.day||1)-1)||'';
-              const lUrl=t.link_type==='klook'?klookLink(dest):go12Link(origin,dest,dayDate);
+              const lUrl=t.link_type==='klook'?klookLink(dest,dayDate):go12Link(origin,dest,dayDate);
               return `<a class="day-transit-chip" href="${lUrl}" target="_blank" rel="noopener">
                 <span class="t-icon">${t.icon||'🚌'}</span>
                 <div class="t-info">
                   <span class="t-name">${t.name||''}</span>
-                  <span class="t-cost">${t.cost||''}</span>
+                  <span class="t-cost">${t.cost||''}${dayDate?` · ${dayDate}`:''}</span>
                 </div>
               </a>`;
             }).join('')}
