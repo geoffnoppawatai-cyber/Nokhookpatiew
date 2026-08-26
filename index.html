@@ -801,7 +801,10 @@ async function attachImage(imgEl,query){
   imgEl.src=svg;
   imgEl.classList.add('img-loaded');
 
-  const photo=await fetchPhoto(key);
+  // Try a real photo of the actual place: Google Places first (uses the same
+  // key already set up for hotel photos), then Pexels as a secondary option.
+  let photo=await fetchGooglePlacePhoto(query);
+  if(!photo) photo=await fetchPhoto(key);
   if(!photo) return;
   const probe=new Image();
   probe.onload=()=>{ imgEl.src=photo; imgEl.classList.add('img-loaded'); };
@@ -949,8 +952,10 @@ function agodaLink(dest,checkin,checkout,guests){
 function klookLink(dest){
   return `https://www.klook.com/th/search/result/?keyword=${encodeURIComponent(dest+' car rental')}`;
 }
-function go12Link(from,to){
-  return `https://12go.asia/th?query=${encodeURIComponent((to||from||''))}`;
+function go12Link(from,to,date){
+  let u=`https://12go.asia/th?query=${encodeURIComponent((to||from||''))}`;
+  if(date)u+=`&date=${date}`;
+  return u;
 }
 
 planBtn.addEventListener('click',async()=>{
@@ -989,7 +994,7 @@ activity/note สั้น 1 ประโยค ร้านอาหาร 1-2 
 
   const bSys=`นักวางแผนทริปมือโปร ตอบ JSON เท่านั้น ห้าม code fence:
 {"flight":{"label":"ชื่อเที่ยวบินตามสไตล์ที่ผู้ใช้เลือก","airlines_code":["TG","QR"],"airlines_name":"Thai Airways / Qatar","pros":"ข้อดี 1 ประโยค","cons":"ข้อควรรู้ 1 ประโยค","depart_time":"~07:00","arrive_time":"~11:00","price_est":"฿X,XXX"},"hotels":[{"tier":"budget","name":"ชื่อโรงแรมจริงระดับประหยัด","area":"ย่าน","desc":"...","price_per_night":"~฿XXX"},{"tier":"mid","name":"ชื่อโรงแรมจริงระดับกลาง","area":"ย่าน","desc":"...","price_per_night":"~฿X,XXX"},{"tier":"luxury","name":"ชื่อโรงแรมจริงระดับหรู","area":"ย่าน","desc":"...","price_per_night":"~฿X,XXX"}],"car_rental":{"recommended":true,"desc":"สั้นๆ ไม่เกิน 2 ประโยค","cost":"~฿XXX/วัน"},"hotel_by_day":[{"day":1,"area":"ย่านที่พักคืนนี้","hotel_name":"ชื่อโรงแรม 1 ที่","price":"~฿XXX"}],"transit_by_day":[{"day":1,"options":[{"icon":"🚇","name":"วิธีเดินทาง","cost":"~฿XX","link_type":"12go"}]}]}
-สำคัญมาก: flight ให้แนะนำ 1 เที่ยวบินเดียวที่ตรงกับ "สไตล์การบิน" ที่ผู้ใช้เลือกเท่านั้น hotels คือ 3 ระดับราคาให้เลือก (ไม่ผูกวัน) hotel_by_day คือที่พักจริงแต่ละคืน 1 ที่ต่อวันครบทุกวัน ถ้าพักที่เดิมหลายคืนให้ใช้ชื่อเดิม ราคาประมาณการ ภาษาไทย สั้นมาก airlines_code เป็น IATA 2 ตัว ห้ามขึ้นบรรทัดใหม่ใน string`;
+สำคัญมาก: flight เป็น field ที่ต้องมีเสมอ ห้ามข้าม ให้แนะนำ 1 เที่ยวบินเดียวที่ตรงกับ "สไตล์การบิน" ที่ผู้ใช้เลือกเท่านั้น hotels คือ 3 ระดับราคาให้เลือก (ไม่ผูกวัน) hotel_by_day คือที่พักจริงแต่ละคืน 1 ที่ต่อวันครบทุกวัน ถ้าพักที่เดิมหลายคืนให้ใช้ชื่อเดิม ราคาประมาณการ ภาษาไทย สั้นมาก airlines_code เป็น IATA 2 ตัว ห้ามขึ้นบรรทัดใหม่ใน string`;
 
   try{
     // Phase 1: overview
@@ -1060,7 +1065,7 @@ function renderTrip(trip){
   const startD=trip.startD||'';
   const endD=trip.endD||'';
   const travelers=trip.travelers||2;
-  const dest=trip.destination||'';
+  const dest=trip.destination||destEn||'';
   const pills=[['✈️ เที่ยวบิน',b.flight],['🏨 ที่พัก',b.hotel],['🍜 อาหาร',b.food],['🎡 กิจกรรม',b.activities],['🎒 สำรอง',b.buffer]];
 
   // ── Single flight (matches user's chosen style) ──
@@ -1078,7 +1083,7 @@ function renderTrip(trip){
   if(retFmt) flightQuery+=` through ${retFmt}`;
   const flightSearchUrl=`https://www.google.com/travel/flights?q=${encodeURIComponent(flightQuery)}`;
   let flightHtml='';
-  if(f){
+  if(f&&(f.label||f.airlines_name)){
     const codes=f.airlines_code||[];
     const logoHtml=codes.map(code=>`<img class="airline-logo" src="https://images.kiwi.com/airlines/64/${code}.png" alt="${code}" onerror="this.outerHTML='<div class=\\'airline-logo-fallback\\'>${code}</div>'">`).join('');
     flightHtml=`
@@ -1094,6 +1099,13 @@ function renderTrip(trip){
         <div class="cons-box">${f.cons||''}</div>
       </div>
       <a class="book-btn sky" href="${flightSearchUrl}" target="_blank" rel="noopener">🔍 ค้นหาตั๋วบน Google Flights</a>
+    </div>`;
+  } else {
+    // AI didn't return flight details this time — still give a usable search link instead of nothing
+    flightHtml=`
+    <div class="flight-card" style="max-width:560px">
+      <div class="flight-name">ยังไม่มีคำแนะนำเที่ยวบินเฉพาะ ลองค้นหาเองได้เลย</div>
+      <a class="book-btn sky" href="${flightSearchUrl}" target="_blank" rel="noopener" style="margin-top:12px">🔍 ค้นหาตั๋วบน Google Flights</a>
     </div>`;
   }
 
@@ -1145,10 +1157,12 @@ function renderTrip(trip){
   // Build hotel-by-day map from hotel_by_day (1 lodging per night)
   const hotelByDay={};
   (bk.hotel_by_day||[]).forEach(hd=>{
-    const cin=addDays(startD,hd.day-1)||startD;
-    const cout=addDays(startD,hd.day)||endD;
+    const dayNum=Number(hd.day);
+    if(!dayNum) return; // skip malformed entries instead of silently corrupting the map
+    const cin=addDays(startD,dayNum-1)||startD;
+    const cout=addDays(startD,dayNum)||endD;
     const searchName=(hd.hotel_name||hd.area||dest);
-    hotelByDay[hd.day]={
+    hotelByDay[dayNum]={
       name:hd.hotel_name||('ที่พักย่าน '+(hd.area||dest)),
       area:hd.area||'',
       price:hd.price||'',
@@ -1237,7 +1251,8 @@ function renderTrip(trip){
           <div class="day-transit-label">🚌 การเดินทางวันนี้</div>
           <div class="day-transit-items">
             ${d.transit.map(t=>{
-              const lUrl=t.link_type==='klook'?klookLink(dest):go12Link(origin,dest);
+              const dayDate=addDays(startD,(d.day||1)-1)||'';
+              const lUrl=t.link_type==='klook'?klookLink(dest):go12Link(origin,dest,dayDate);
               return `<a class="day-transit-chip" href="${lUrl}" target="_blank" rel="noopener">
                 <span class="t-icon">${t.icon||'🚌'}</span>
                 <div class="t-info">
