@@ -155,6 +155,14 @@ nav{position:relative;z-index:10;display:flex;align-items:center;justify-content
 .rest-label{font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:rgba(255,255,255,0.4);margin-bottom:12px;display:flex;align-items:center;gap:6px}
 .rest-label::after{content:'';flex:1;height:1px;background:rgba(255,255,255,0.08)}
 .rest-items{display:flex;flex-direction:column;gap:10px}
+
+/* Secret local pick */
+.secret-pick{margin-top:14px;border:1.5px dashed var(--gold);border-radius:14px;padding:14px 16px;background:rgba(245,166,35,0.07);position:relative}
+.secret-pick-label{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--gold);margin-bottom:8px}
+.secret-pick-name{font-size:14.5px;font-weight:700;color:#fff;margin-bottom:3px}
+.secret-pick-area{font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:6px}
+.secret-pick-why{font-size:13px;color:rgba(255,255,255,0.75);line-height:1.55;font-style:italic}
+.secret-pick-price{position:absolute;top:14px;right:16px;font-family:'Prompt',sans-serif;font-weight:700;color:var(--gold);font-size:13px}
 .rest-item{display:flex;align-items:center;gap:12px;background:rgba(255,255,255,0.05);border-radius:12px;padding:10px 14px}
 .rest-meal{font-size:11px;color:var(--gold);font-weight:700;flex:0 0 66px;text-transform:uppercase;letter-spacing:0.06em}
 .rest-name{flex:1;font-size:14px;font-weight:600;color:rgba(255,255,255,0.9)}
@@ -203,6 +211,8 @@ nav{position:relative;z-index:10;display:flex;align-items:center;justify-content
 .hotel-card{background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:18px;overflow:hidden;transition:all .2s}
 .hotel-card:hover{transform:translateY(-2px);background:rgba(255,255,255,0.1)}
 .hotel-tier{padding:14px 16px 0}
+.hotel-thumb{width:100%;height:130px;object-fit:cover;border-radius:12px;display:none;margin-bottom:12px}
+.hotel-thumb.loaded{display:block}
 .hotel-tier-badge{display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;padding:3px 10px;border-radius:999px;margin-bottom:8px}
 .tier-budget{background:rgba(46,204,113,0.2);color:#2ecc71}
 .tier-mid{background:rgba(78,173,212,0.2);color:var(--sky)}
@@ -357,7 +367,7 @@ nav{position:relative;z-index:10;display:flex;align-items:center;justify-content
           <div id="advisoryBox"></div>
         </div>
 
-        <div class="field">
+        <div class="field full">
           <label>เมือง (ถ้ามีในใจ)</label>
           <input type="text" id="city" placeholder="ปล่อยว่าง = นกฮูกเลือกให้">
         </div>
@@ -494,10 +504,20 @@ function extractJSON(text){
   t=t.replace(/,(\s*[\]}])/g,'$1');
   try{return JSON.parse(t)}catch(_){return JSON.parse(repairJSON(t))}
 }
+// ── Backend endpoint ──
+// เมื่อ deploy บน Vercel แล้ว ให้ใส่ URL ของ backend ตรงนี้
+// เช่น 'https://your-project-name.vercel.app/api/plan'
+// ปล่อยว่างไว้ = เรียก Claude API ตรงๆ (ใช้ได้แค่ตอนทดสอบในแชท claude.ai เท่านั้น)
+const BACKEND_URL = 'https://trip-planner-backend-beta.vercel.app/api/plan';   // <-- ใส่ URL ของ Vercel backend ตรงนี้
+
 async function callAPI(sys,usr,maxTokens=4096,attempt=1){
-  const r=await fetch('https://api.anthropic.com/v1/messages',{
+  const endpoint = BACKEND_URL || 'https://api.anthropic.com/v1/messages';
+  const body = BACKEND_URL
+    ? {system:sys,max_tokens:maxTokens,messages:[{role:'user',content:usr}]}
+    : {model:'claude-sonnet-4-6',max_tokens:maxTokens,system:sys,messages:[{role:'user',content:usr}]};
+  const r=await fetch(endpoint,{
     method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:maxTokens,system:sys,messages:[{role:'user',content:usr}]})
+    body:JSON.stringify(body)
   });
   const d=await r.json();
   const raw=(d.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n');
@@ -509,243 +529,196 @@ async function callAPI(sys,usr,maxTokens=4096,attempt=1){
 
 const imgCache={};
 
-// ── Fully offline destination illustrations — no network calls, always renders ──
-// Detects a scene type from the keyword (temple / mountain / beach / city / lake / waterfall / nature)
-// and draws a simple layered vector scene in that style, so each card looks intentional
-// rather than a generic blank gradient.
+// ── Fully offline "flat cartoon badge" illustrations — no network calls, always renders ──
+// Bright flat-design style: colored badge background + big central landmark icon +
+// small decorative confetti (sun/clouds/dots), inspired by cute travel-sticker art.
 function detectScene(query){
   const q=(query||'').toLowerCase();
   if(/torii|shrine|jinja|inari/.test(q)) return 'torii';
-  if(/temple|wat |pagoda|palace|castle|church|cathedral/.test(q)) return 'temple';
-  if(/beach|island|coast|bay|sea|ocean|lagoon|resort|maldive|phuket|krabi/.test(q)) return 'beach';
-  if(/mountain|peak|alps|fuji|volcano|hill|highland|cook/.test(q)) return 'mountain';
-  if(/lake|tekapo|pond|wanaka|loch/.test(q)) return 'lake';
-  if(/waterfall|falls/.test(q)) return 'waterfall';
-  if(/city|tower|skyline|street|downtown|market|tokyo|osaka|bangkok|seoul|shibuya/.test(q)) return 'city';
-  if(/forest|jungle|park|garden|bamboo|arashiyama|wood/.test(q)) return 'forest';
-  if(/desert|dune|sahara|canyon/.test(q)) return 'desert';
-  return 'landscape';
+  if(/temple|wat |pagoda|palace|castle|church|cathedral|kyoto|nara|angkor|luang prabang|chiang mai/.test(q)) return 'temple';
+  if(/tower|skyline|downtown|newyork|new york|london|paris|dubai|shanghai/.test(q)) return 'tower';
+  if(/beach|island|coast|bay|sea|ocean|lagoon|resort|maldive|phuket|krabi|bali|hawaii|santorini|okinawa|cebu|boracay/.test(q)) return 'beach';
+  if(/mountain|peak|alps|fuji|volcano|hill|highland|cook|everest|himalaya|zermatt|switzerland|nepal|annapurna/.test(q)) return 'mountain';
+  if(/lake|tekapo|pond|wanaka|loch|geneva/.test(q)) return 'lake';
+  if(/waterfall|falls|niagara/.test(q)) return 'waterfall';
+  if(/city|street|market|tokyo|osaka|bangkok|seoul|shibuya|singapore|hong ?kong/.test(q)) return 'city';
+  if(/forest|jungle|park|garden|bamboo|arashiyama|wood|amazon|borneo|rainforest/.test(q)) return 'forest';
+  if(/desert|dune|sahara|canyon|marrakech|morocco/.test(q)) return 'desert';
+  return 'landmark';
 }
 
 function sceneSvg(query){
-  // Six curated palettes: [skyTop, skyBottom, sun, farLayer, midLayer, nearLayer]
+  // Bright flat-cartoon palettes: [bg, bgSoft, landmark, accent, accent2]
   const palettes=[
-    ['#0B1E3A','#3E6F94','#F5A623','#2C5470','#1E3E56','#0E2233'], // dusk blue
-    ['#12233B','#C96A4B','#FFD07A','#8A4A46','#5A3038','#241726'], // sunset warm
-    ['#0D2B1F','#4E9C7A','#F3E7A9','#2F6E63','#1D4A42','#0E2A24'], // jungle green
-    ['#241236','#7B5EA7','#FFC46B','#553C7B','#3A2857','#1E1233'], // violet night
-    ['#08303A','#48A2A8','#FFE3A3','#2C6E75','#1B4A50','#0C2C31'], // teal lagoon
-    ['#2A1810','#B8763A','#FFCF87','#8A5228','#5E3619','#2E1B0C'], // desert amber
+    ['#FFE8A3','#FFF6DC','#2E6E62','#FF6B6B','#FFFFFF'], // sunny yellow
+    ['#BEE7E8','#E4F7F7','#12405C','#FF9F43','#FFFFFF'], // sky teal
+    ['#FFD3D3','#FFEDED','#8B3A3A','#4EADD4','#FFFFFF'], // coral pink
+    ['#D8E8C8','#EEF6E4','#2F5233','#F5A623','#FFFFFF'], // spring green
+    ['#E3D9F7','#F3EEFC','#4A3B78','#FF6B6B','#FFFFFF'], // lavender
+    ['#FFDCC2','#FFEEE0','#7A3E1D','#2E6E62','#FFFFFF'], // peach
   ];
   const h=Math.abs([...(query||'x')].reduce((a,c)=>((a<<5)-a)+c.charCodeAt(0)|0,0));
-  const P=palettes[h%palettes.length];
-  const [skyTop,skyBot,sun,far,mid,near]=P;
+  const [bg,bgSoft,ink,accent,white]=palettes[h%palettes.length];
   const scene=detectScene(query);
-  const sunX=140+(h%620), sunY=105+(h%50);
-  const R=(n,seed)=>Math.abs(((h+seed*97)>>3))%n; // deterministic pseudo-random
 
-  // Stars (only on darker palettes)
-  let stars='';
-  for(let i=0;i<26;i++){
-    const x=R(880,i+3)+10, y=R(190,i+11)+8, r=(R(10,i+5)/10)*1.2+0.5;
-    stars+=`<circle cx="${x}" cy="${y}" r="${r.toFixed(1)}" fill="#fff" opacity="${(0.15+(R(50,i+7)/100)).toFixed(2)}"/>`;
-  }
-
-  // Soft clouds
-  let clouds='';
-  for(let i=0;i<3;i++){
-    const cx=90+R(700,i+21), cy=70+R(90,i+31), sc=(0.7+R(70,i+41)/100).toFixed(2);
-    clouds+=`<g transform="translate(${cx},${cy}) scale(${sc})" opacity="0.13">
-      <ellipse cx="0" cy="0" rx="54" ry="16" fill="#fff"/>
-      <ellipse cx="-26" cy="6" rx="34" ry="12" fill="#fff"/>
-      <ellipse cx="30" cy="5" rx="38" ry="13" fill="#fff"/></g>`;
-  }
-
-  // Birds
-  const birds=[0,1,2].map(i=>{
-    const bx=560+R(230,i+51), by=110+R(70,i+61), s=(0.6+R(50,i+71)/100).toFixed(2);
-    return `<path d="M${bx},${by} q6,-6 12,0 q6,-6 12,0" stroke="#fff" stroke-width="1.8" fill="none" opacity="0.4" transform="scale(${s})" transform-origin="${bx} ${by}"/>`;
-  }).join('');
-
-  const sunDisc=`<circle cx="${sunX}" cy="${sunY}" r="86" fill="${sun}" opacity="0.10"/>
-    <circle cx="${sunX}" cy="${sunY}" r="56" fill="${sun}" opacity="0.16"/>
-    <circle cx="${sunX}" cy="${sunY}" r="34" fill="${sun}" opacity="0.92"/>`;
-
-  // Rolling far ridges shared by many scenes
-  const ridge=(y,fill,op)=>`<path d="M0,${y} C120,${y-46} 220,${y-8} 330,${y-30} C450,${y-54} 560,${y-10} 680,${y-34} C790,${y-56} 850,${y-16} 900,${y-26} L900,500 L0,500 Z" fill="${fill}" opacity="${op}"/>`;
-
-  let fg='';
-
-  if(scene==='mountain'){
-    fg=`${ridge(330,far,'0.55')}
-      <polygon points="120,340 300,120 480,340" fill="${mid}"/>
-      <polygon points="300,120 356,188 244,188" fill="#FFFFFF" opacity="0.9"/>
-      <polygon points="380,350 560,170 740,350" fill="${mid}" opacity="0.85"/>
-      <polygon points="560,170 606,226 514,226" fill="#FFFFFF" opacity="0.85"/>
-      <polygon points="640,355 800,215 900,355" fill="${near}" opacity="0.9"/>
-      <rect x="0" y="345" width="900" height="155" fill="${near}"/>
-      <path d="M0,368 Q220,352 450,368 T900,368" stroke="#fff" stroke-width="2" fill="none" opacity="0.10"/>`;
-  }
-  else if(scene==='lake'){
-    fg=`${ridge(300,far,'0.5')}
-      <polygon points="90,318 280,150 470,318" fill="${mid}"/>
-      <polygon points="280,150 322,206 238,206" fill="#fff" opacity="0.85"/>
-      <polygon points="420,318 610,180 800,318" fill="${mid}" opacity="0.8"/>
-      <rect x="0" y="318" width="900" height="182" fill="${near}" opacity="0.75"/>
-      <polygon points="90,318 280,470 470,318" fill="${mid}" opacity="0.22"/>
-      <polygon points="420,318 610,440 800,318" fill="${mid}" opacity="0.18"/>
-      <circle cx="${sunX}" cy="${318+(318-sunY)*0.55}" r="26" fill="${sun}" opacity="0.20"/>
-      ${[340,368,396,424,452].map((y,i)=>`<path d="M${60+i*30},${y} h${160+i*90}" stroke="#fff" stroke-width="2" opacity="${(0.16-i*0.02).toFixed(2)}"/>`).join('')}`;
-  }
-  else if(scene==='beach'){
-    fg=`<rect x="0" y="300" width="900" height="120" fill="${mid}" opacity="0.85"/>
-      <circle cx="${sunX}" cy="${300+(300-sunY)*0.5}" r="24" fill="${sun}" opacity="0.25"/>
-      ${[318,344,370,396].map((y,i)=>`<path d="M${40+i*40},${y} h${200+i*80}" stroke="#fff" stroke-width="2.2" opacity="${(0.22-i*0.04).toFixed(2)}"/>`).join('')}
-      <path d="M0,412 Q220,392 450,412 T900,404 L900,500 L0,500 Z" fill="${sun}" opacity="0.5"/>
-      <path d="M0,430 Q240,414 460,430 T900,424 L900,500 L0,500 Z" fill="${near}" opacity="0.45"/>
-      <g transform="translate(140,168)">
-        <path d="M0,0 q-14,66 -22,140" stroke="${near}" stroke-width="13" fill="none" stroke-linecap="round"/>
-        <path d="M0,4 q-56,-40 -112,-14 q46,-6 64,10 q-52,6 -84,40 q46,-26 86,-24 q-40,20 -58,58 q40,-44 88,-50 Z" fill="${far}"/>
-        <path d="M0,4 q56,-42 114,-12 q-46,-8 -66,8 q54,8 84,44 q-46,-28 -86,-26 q42,22 60,60 q-42,-46 -90,-52 Z" fill="${far}" opacity="0.92"/>
-        <path d="M0,0 q-10,-52 12,-92 q4,44 -2,88 Z" fill="${far}" opacity="0.8"/>
-        <circle cx="-6" cy="8" r="7" fill="${sun}" opacity="0.65"/>
-        <circle cx="9" cy="12" r="6" fill="${sun}" opacity="0.5"/>
-      </g>
-      <g transform="translate(768,206) scale(0.86)">
-        <path d="M0,0 q12,62 20,124" stroke="${near}" stroke-width="12" fill="none" stroke-linecap="round"/>
-        <path d="M0,2 q-54,-38 -108,-12 q44,-6 62,10 q-50,8 -80,42 q44,-28 84,-26 Z" fill="${far}" opacity="0.95"/>
-        <path d="M0,2 q54,-40 110,-10 q-44,-8 -64,8 q52,10 80,44 q-44,-28 -84,-26 Z" fill="${far}" opacity="0.85"/>
-        <path d="M0,-2 q-8,-48 14,-84 q2,42 -4,82 Z" fill="${far}" opacity="0.75"/>
-      </g>`;
-  }
-  else if(scene==='torii'){
-    fg=`${ridge(340,far,'0.5')}
-      <rect x="0" y="352" width="900" height="148" fill="${near}"/>
-      <g transform="translate(450,150)">
-        <rect x="-150" y="0" width="300" height="20" rx="6" fill="#C1352B"/>
-        <path d="M-172,0 q172,-26 344,0 l0,-16 q-172,-26 -344,0 Z" fill="#9E2A22"/>
-        <rect x="-120" y="52" width="240" height="14" rx="4" fill="#C1352B"/>
-        <rect x="-104" y="20" width="26" height="182" fill="#C1352B"/>
-        <rect x="78" y="20" width="26" height="182" fill="#C1352B"/>
-        <rect x="-110" y="196" width="38" height="12" rx="3" fill="#8E241D"/>
-        <rect x="72" y="196" width="38" height="12" rx="3" fill="#8E241D"/>
-      </g>
-      <ellipse cx="450" cy="392" rx="210" ry="16" fill="#000" opacity="0.14"/>`;
-  }
-  else if(scene==='temple'){
-    fg=`${ridge(346,far,'0.5')}
-      <rect x="0" y="356" width="900" height="144" fill="${near}"/>
-      <g transform="translate(450,132)">
-        <polygon points="0,-34 16,-6 -16,-6" fill="${sun}"/>
-        <path d="M-104,6 L104,6 L74,-24 L-74,-24 Z" fill="${sun}" opacity="0.95"/>
-        <path d="M-124,10 q124,-16 248,0 l-18,14 q-106,-12 -212,0 Z" fill="${mid}"/>
-        <rect x="-66" y="24" width="132" height="42" fill="${far}"/>
-        <path d="M-92,66 q92,-14 184,0 l-16,14 q-76,-10 -152,0 Z" fill="${mid}"/>
-        <rect x="-50" y="80" width="100" height="52" fill="${far}"/>
-        <path d="M-74,132 q74,-12 148,0 l-14,14 q-60,-9 -120,0 Z" fill="${mid}"/>
-        <rect x="-38" y="146" width="76" height="60" fill="${far}"/>
-        <rect x="-13" y="168" width="26" height="38" rx="3" fill="${skyTop}" opacity="0.85"/>
-      </g>
-      <ellipse cx="450" cy="396" rx="176" ry="15" fill="#000" opacity="0.14"/>`;
-  }
-  else if(scene==='city'){
-    const towers=[40,112,178,250,318,392,470,548,618,690,758,826].map((x,i)=>{
-      const w=52+R(18,i+5), hh=110+R(190,i+9), y=372-hh;
-      let win='';
-      for(let r=0;r<Math.floor(hh/26);r++){
-        for(let c=0;c<Math.floor(w/18);c++){
-          if(R(10,i*13+r*7+c*3)>4) continue;
-          win+=`<rect x="${x+7+c*18}" y="${y+12+r*26}" width="7" height="11" fill="${sun}" opacity="0.75"/>`;
-        }
-      }
-      return `<rect x="${x}" y="${y}" width="${w}" height="${hh}" fill="${i%2?mid:near}" opacity="${(0.82+(i%3)*0.06).toFixed(2)}"/>${win}`;
-    }).join('');
-    fg=`${ridge(330,far,'0.35')}
-      ${towers}
-      <g transform="translate(452,120)">
-        <polygon points="0,0 15,44 -15,44" fill="${near}"/>
-        <rect x="-9" y="44" width="18" height="208" fill="${near}"/>
-        <rect x="-30" y="112" width="60" height="16" rx="4" fill="${mid}"/>
-        <circle cx="0" cy="-8" r="5" fill="${sun}"/>
-      </g>
-      <rect x="0" y="372" width="900" height="128" fill="${skyTop}" opacity="0.9"/>`;
-  }
-  else if(scene==='forest'){
-    const trees=[];
-    for(let i=0;i<16;i++){
-      const x=24+i*58+R(18,i+3), base=402+R(28,i+9), hh=118+R(96,i+13), w=hh*0.42;
-      const col=i%3===0?far:(i%3===1?mid:near);
-      trees.push(`<g transform="translate(${x},${base})">
-        <rect x="-4" y="-14" width="8" height="16" fill="${near}"/>
-        <polygon points="0,${-hh} ${-w/2},${-hh*0.42} ${w/2},${-hh*0.42}" fill="${col}"/>
-        <polygon points="0,${-hh*0.74} ${-w*0.62},${-hh*0.16} ${w*0.62},${-hh*0.16}" fill="${col}" opacity="0.92"/>
-        <polygon points="0,${-hh*0.46} ${-w*0.72},${-4} ${w*0.72},${-4}" fill="${col}" opacity="0.86"/>
-      </g>`);
+  // Decorative confetti scattered around (dots, tiny clouds) — deterministic per query
+  const R=(n,seed)=>Math.abs(((h+seed*97)>>3))%n;
+  let confetti='';
+  const confettiShapes=['circle','cloud','star'];
+  for(let i=0;i<7;i++){
+    const shape=confettiShapes[R(3,i+1)];
+    const cx=60+R(780,i+2), cy=60+R(200,i+5);
+    // keep clear of the center landmark zone
+    if(cx>280 && cx<620 && cy>140 && cy<420) continue;
+    const sc=(0.5+R(60,i+9)/100).toFixed(2);
+    const col=[accent,white,ink][R(3,i+13)];
+    const op=(0.35+R(40,i+17)/100).toFixed(2);
+    if(shape==='circle'){
+      confetti+=`<circle cx="${cx}" cy="${cy}" r="${10*sc}" fill="${col}" opacity="${op}"/>`;
+    } else if(shape==='cloud'){
+      confetti+=`<g transform="translate(${cx},${cy}) scale(${sc})" opacity="${op}">
+        <ellipse cx="0" cy="0" rx="22" ry="9" fill="${white}"/>
+        <ellipse cx="-11" cy="3" rx="14" ry="7" fill="${white}"/>
+        <ellipse cx="12" cy="2" rx="15" ry="8" fill="${white}"/></g>`;
+    } else {
+      confetti+=`<g transform="translate(${cx},${cy}) scale(${sc})" opacity="${op}" fill="${col}">
+        <polygon points="0,-10 2.5,-3 10,-3 4,1.5 6,9 0,4.5 -6,9 -4,1.5 -10,-3 -2.5,-3"/></g>`;
     }
-    fg=`${ridge(330,far,'0.42')}
-      <rect x="0" y="330" width="900" height="170" fill="${near}" opacity="0.35"/>
-      <path d="M0,320 Q225,300 450,318 T900,308" stroke="#fff" stroke-width="26" fill="none" opacity="0.05"/>
-      ${trees.join('')}`;
   }
-  else if(scene==='waterfall'){
-    fg=`<polygon points="0,500 0,150 300,110 356,500" fill="${mid}"/>
-      <polygon points="900,500 900,132 600,96 546,500" fill="${mid}" opacity="0.92"/>
-      <polygon points="0,150 300,110 300,180 0,220" fill="${far}" opacity="0.5"/>
-      <rect x="356" y="104" width="190" height="330" fill="#FFFFFF" opacity="0.20"/>
-      <rect x="372" y="104" width="34" height="330" fill="#FFFFFF" opacity="0.34"/>
-      <rect x="424" y="104" width="26" height="330" fill="#FFFFFF" opacity="0.26"/>
-      <rect x="472" y="104" width="30" height="330" fill="#FFFFFF" opacity="0.30"/>
-      <ellipse cx="451" cy="438" rx="150" ry="26" fill="#FFFFFF" opacity="0.22"/>
-      <ellipse cx="451" cy="446" rx="220" ry="34" fill="${near}" opacity="0.55"/>
-      <rect x="0" y="452" width="900" height="48" fill="${near}"/>`;
-  }
-  else if(scene==='desert'){
-    fg=`<path d="M0,340 Q160,280 320,336 Q460,384 620,326 Q770,272 900,330 L900,500 L0,500 Z" fill="${mid}"/>
-      <path d="M0,392 Q180,344 360,394 Q520,438 700,388 Q820,354 900,382 L900,500 L0,500 Z" fill="${near}"/>
-      <path d="M0,340 Q160,280 320,336 L320,346 Q160,292 0,352 Z" fill="#fff" opacity="0.10"/>
-      <g transform="translate(700,318) scale(1.9)">
-        <rect x="-8" y="-62" width="16" height="76" rx="8" fill="${far}"/>
-        <rect x="-34" y="-44" width="13" height="40" rx="6.5" fill="${far}"/>
-        <rect x="-34" y="-44" width="30" height="13" rx="6.5" fill="${far}"/>
-        <rect x="21" y="-32" width="13" height="30" rx="6.5" fill="${far}"/>
-        <rect x="8" y="-32" width="26" height="13" rx="6.5" fill="${far}"/>
+
+  // Ground blob under the landmark
+  const ground=`<ellipse cx="450" cy="405" rx="270" ry="46" fill="${accent}" opacity="0.16"/>`;
+
+  let landmark='';
+  if(scene==='tower'){
+    landmark=`<g transform="translate(450,150)">
+      <polygon points="0,-140 20,60 -20,60" fill="${ink}"/>
+      <polygon points="0,-140 10,-40 -10,-40" fill="${white}" opacity="0.25"/>
+      <rect x="-42" y="20" width="84" height="16" rx="4" fill="${ink}"/>
+      <rect x="-30" y="-30" width="60" height="14" rx="4" fill="${ink}"/>
+      <circle cx="0" cy="-155" r="9" fill="${accent}"/>
+      <rect x="-26" y="60" width="52" height="90" rx="6" fill="${ink}"/>
+      <rect x="-14" y="80" width="10" height="14" fill="${bg}"/>
+      <rect x="4" y="80" width="10" height="14" fill="${bg}"/>
+      <rect x="-14" y="104" width="10" height="14" fill="${bg}"/>
+      <rect x="4" y="104" width="10" height="14" fill="${bg}"/>
+    </g>`;
+  } else if(scene==='torii'){
+    landmark=`<g transform="translate(450,190)">
+      <rect x="-130" y="-6" width="260" height="26" rx="8" fill="#D64545"/>
+      <path d="M-150,-6 q150,-22 300,0 l0,-14 q-150,-22 -300,0 Z" fill="#B93A3A"/>
+      <rect x="-96" y="42" width="192" height="16" rx="5" fill="#D64545"/>
+      <rect x="-84" y="14" width="22" height="150" fill="#D64545"/>
+      <rect x="62" y="14" width="22" height="150" fill="#D64545"/>
+      <rect x="-90" y="160" width="34" height="12" rx="3" fill="#A83232"/>
+      <rect x="56" y="160" width="34" height="12" rx="3" fill="#A83232"/>
+    </g>`;
+  } else if(scene==='temple'){
+    landmark=`<g transform="translate(450,130)">
+      <polygon points="0,-30 14,-8 -14,-8" fill="${accent}"/>
+      <path d="M-92,10 L92,10 L64,-16 L-64,-16 Z" fill="${accent}"/>
+      <path d="M-110,14 q110,-14 220,0 l-16,12 q-94,-10 -188,0 Z" fill="${ink}"/>
+      <rect x="-58" y="26" width="116" height="38" fill="${ink}" opacity="0.9"/>
+      <path d="M-82,64 q82,-12 164,0 l-14,12 q-68,-9 -136,0 Z" fill="${ink}"/>
+      <rect x="-44" y="76" width="88" height="46" fill="${ink}" opacity="0.9"/>
+      <path d="M-66,122 q66,-10 132,0 l-12,12 q-54,-8 -108,0 Z" fill="${ink}"/>
+      <rect x="-30" y="134" width="60" height="52" fill="${ink}" opacity="0.9"/>
+      <rect x="-11" y="152" width="22" height="34" rx="3" fill="${bg}"/>
+    </g>`;
+  } else if(scene==='mountain'){
+    landmark=`<g transform="translate(450,175)">
+      <polygon points="0,-90 110,80 -110,80" fill="${ink}"/>
+      <polygon points="0,-90 34,-24 -34,-24" fill="${white}" opacity="0.9"/>
+      <polygon points="-150,80 -70,-30 10,80" fill="${ink}" opacity="0.75"/>
+      <polygon points="150,80 80,-10 30,80" fill="${ink}" opacity="0.75"/>
+    </g>`;
+  } else if(scene==='lake'){
+    landmark=`<g transform="translate(450,180)">
+      <polygon points="-80,60 0,-60 80,60" fill="${ink}"/>
+      <polygon points="0,-60 22,-14 -22,-14" fill="${white}" opacity="0.9"/>
+      <polygon points="60,60 130,-20 190,60" fill="${ink}" opacity="0.7"/>
+      <rect x="-220" y="60" width="440" height="70" fill="${accent}" opacity="0.28" rx="6"/>
+      <polygon points="-80,60 0,150 80,60" fill="${ink}" opacity="0.18"/>
+    </g>`;
+  } else if(scene==='waterfall'){
+    landmark=`<g transform="translate(450,175)">
+      <polygon points="-150,90 -150,-40 -30,-10 -30,90" fill="${ink}" opacity="0.85"/>
+      <polygon points="150,90 150,-60 30,-20 30,90" fill="${ink}" opacity="0.85"/>
+      <rect x="-30" y="-40" width="60" height="130" fill="${white}" opacity="0.75"/>
+      <rect x="-16" y="-40" width="12" height="130" fill="${white}"/>
+      <rect x="6" y="-40" width="10" height="130" fill="${white}" opacity="0.85"/>
+      <ellipse cx="0" cy="96" rx="70" ry="14" fill="${white}" opacity="0.5"/>
+    </g>`;
+  } else if(scene==='city'){
+    landmark=`<g transform="translate(450,190)">
+      ${[-150,-95,-40,20,80,135].map((x,i)=>{
+        const hh=70+((h+i*29)%80);
+        return `<rect x="${x}" y="${60-hh}" width="42" height="${hh}" rx="4" fill="${ink}" opacity="${0.7+(i%3)*0.1}"/>`;
+      }).join('')}
+      <rect x="-8" y="-70" width="16" height="130" fill="${accent}"/>
+      <polygon points="0,-84 12,-70 -12,-70" fill="${accent}"/>
+    </g>`;
+  } else if(scene==='forest'){
+    landmark=`<g transform="translate(450,190)">
+      ${[-160,-95,-30,35,100,160].map((x,i)=>{
+        const hh=90+((h+i*17)%40);
+        const treeGreen=i%2?'#2F6E52':'#3F8763';
+        return `<g transform="translate(${x},${60-hh})">
+          <rect x="-4" y="${hh-14}" width="8" height="14" fill="${ink}"/>
+          <polygon points="0,0 -30,${hh-12} 30,${hh-12}" fill="${treeGreen}" opacity="0.92"/>
+          <polygon points="0,18 -24,${hh-4} 24,${hh-4}" fill="${treeGreen}" opacity="0.78"/>
+        </g>`;
+      }).join('')}
+    </g>`;
+  } else if(scene==='beach'){
+    landmark=`<g transform="translate(450,200)">
+      <path d="M-200,60 Q0,20 200,60 L200,90 L-200,90 Z" fill="${accent}" opacity="0.3"/>
+      <g transform="translate(-70,-10)">
+        <rect x="-5" y="0" width="10" height="80" fill="${ink}"/>
+        <path d="M0,0 q-40,-30 -80,-6 q34,-4 46,10 q-36,4 -60,32 q34,-20 62,-18 Z" fill="${accent}"/>
+        <path d="M0,0 q40,-32 80,-4 q-34,-6 -48,8 q36,6 58,34 q-32,-22 -60,-18 Z" fill="${accent}" opacity="0.85"/>
       </g>
-      <g transform="translate(232,352) scale(1.25)">
-        <rect x="-7" y="-50" width="14" height="62" rx="7" fill="${far}" opacity="0.85"/>
-        <rect x="16" y="-34" width="11" height="30" rx="5.5" fill="${far}" opacity="0.85"/>
-        <rect x="5" y="-34" width="22" height="11" rx="5.5" fill="${far}" opacity="0.85"/>
+      <circle cx="90" cy="-70" r="34" fill="${accent}"/>
+      <g stroke="${accent}" stroke-width="4" opacity="0.7">
+        <line x1="90" y1="-118" x2="90" y2="-104"/>
+        <line x1="90" y1="-22" x2="90" y2="-8"/>
+        <line x1="42" y1="-70" x2="56" y2="-70"/>
+        <line x1="124" y1="-70" x2="138" y2="-70"/>
       </g>
-      <ellipse cx="700" cy="322" rx="46" ry="7" fill="#000" opacity="0.16"/>`;
-  }
-  else { // landscape
-    fg=`${ridge(320,far,'0.5')}
-      ${ridge(368,mid,'0.75')}
-      <path d="M0,412 C140,386 260,428 400,410 C540,392 660,432 900,404 L900,500 L0,500 Z" fill="${near}"/>
-      <g transform="translate(742,352)">
-        <rect x="-4" y="-40" width="8" height="42" fill="${far}"/>
-        <circle cx="0" cy="-52" r="26" fill="${far}" opacity="0.9"/>
-        <circle cx="-18" cy="-40" r="18" fill="${far}" opacity="0.85"/>
-        <circle cx="19" cy="-42" r="16" fill="${far}" opacity="0.85"/>
+    </g>`;
+  } else if(scene==='desert'){
+    landmark=`<g transform="translate(450,210)">
+      <path d="M-220,50 Q-100,10 20,46 Q140,80 220,40 L220,90 L-220,90 Z" fill="${accent}" opacity="0.3"/>
+      <g transform="translate(60,-10) scale(1.6)">
+        <rect x="-7" y="-50" width="14" height="62" rx="7" fill="${ink}"/>
+        <rect x="-28" y="-34" width="11" height="32" rx="5.5" fill="${ink}"/>
+        <rect x="-28" y="-34" width="24" height="10" rx="5" fill="${ink}"/>
+        <rect x="17" y="-24" width="11" height="22" rx="5.5" fill="${ink}"/>
+        <rect x="6" y="-24" width="22" height="10" rx="5" fill="${ink}"/>
       </g>
-      <path d="M0,392 Q225,376 450,392 T900,386" stroke="#fff" stroke-width="2" fill="none" opacity="0.10"/>`;
+    </g>`;
+  } else { // landmark — generic globe + plane badge
+    landmark=`<g transform="translate(450,180)">
+      <circle cx="0" cy="0" r="88" fill="${ink}" opacity="0.9"/>
+      <ellipse cx="0" cy="0" rx="88" ry="34" fill="none" stroke="${bg}" stroke-width="4" opacity="0.5"/>
+      <ellipse cx="0" cy="0" rx="34" ry="88" fill="none" stroke="${bg}" stroke-width="4" opacity="0.5"/>
+      <circle cx="0" cy="0" r="88" fill="none" stroke="${bg}" stroke-width="4" opacity="0.5"/>
+      <g transform="translate(70,-58) rotate(-25)">
+        <rect x="0" y="-6" width="46" height="12" rx="6" fill="${accent}"/>
+        <polygon points="46,-6 60,0 46,6" fill="${accent}"/>
+        <rect x="8" y="-12" width="18" height="8" rx="4" fill="${accent}"/>
+      </g>
+    </g>`;
   }
 
   const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="900" height="500" viewBox="0 0 900 500">`
-    +`<defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">`
-    +`<stop offset="0" stop-color="${skyTop}"/><stop offset="0.62" stop-color="${skyBot}"/>`
-    +`<stop offset="1" stop-color="${skyBot}" stop-opacity="0.86"/></linearGradient>`
-    +`<linearGradient id="vig" x1="0" y1="0" x2="0" y2="1">`
-    +`<stop offset="0" stop-color="#000" stop-opacity="0.20"/>`
-    +`<stop offset="0.45" stop-color="#000" stop-opacity="0"/>`
-    +`<stop offset="1" stop-color="#000" stop-opacity="0.34"/></linearGradient></defs>`
-    +`<rect width="900" height="500" fill="url(SKYREF)"/>`
-    +stars+sunDisc+clouds+birds+fg
-    +`<rect width="900" height="500" fill="url(VIGREF)"/>`
+    +`<rect width="900" height="500" fill="${bgSoft}"/>`
+    +`<circle cx="450" cy="250" r="330" fill="${bg}"/>`
+    +confetti+ground+landmark
+    +`<rect width="900" height="500" fill="none" stroke="${white}" stroke-width="0"/>`
     +`</svg>`;
 
   const encoded=svg
-    .replace(/url\(SKYREF\)/g,'url(%23sky)')
-    .replace(/url\(VIGREF\)/g,'url(%23vig)')
     .replace(/#/g,'%23')
     .replace(/</g,'%3C').replace(/>/g,'%3E')
     .replace(/"/g,'%27')
@@ -753,13 +726,54 @@ function sceneSvg(query){
   return `data:image/svg+xml;charset=utf-8,${encoded}`;
 }
 
-// ── Real-photo layer (Pexels) with instant SVG fallback ──
-// วาง Pexels API Key ตรงนี้ (ขอใหม่ได้ที่ pexels.com/api/new)
-// หมายเหตุ: การดึงรูปถูกบล็อกใน sandbox ของ claude.ai จึงเห็นเป็นภาพวาด SVG
-// เมื่อ deploy ขึ้นเว็บจริง (GitHub Pages/Vercel) รูปถ่ายจะขึ้นอัตโนมัติ
-const PEXELS_KEY = '';   // <-- ใส่ Pexels API Key ตรงนี้
-
+// ── Real-photo layer ──
+// Google Places (accurate photos of the actual hotel/place, used for hotel cards) +
+// Pexels (general scenic photos, used for destination/day banners) — both optional.
+// The flat-cartoon badge (sceneSvg) is the guaranteed fallback either way.
+const GOOGLE_PLACES_KEY = 'AIzaSyBHCV8ZCduxaiBOK1N_ilZiiAHUP0k3nIA';  // <-- ใส่ Google Places API Key ตรงนี้ (console.cloud.google.com)
+const PEXELS_KEY = '';   // <-- ใส่ Pexels API Key ตรงนี้ (ขอใหม่ได้ที่ pexels.com/api/new)
 const photoCache={};
+
+async function fetchGooglePlacePhoto(query){
+  if(!GOOGLE_PLACES_KEY||!query) return null;
+  const cacheKey='gp:'+query;
+  if(photoCache[cacheKey]!==undefined) return photoCache[cacheKey];
+  try{
+    const res=await fetch('https://places.googleapis.com/v1/places:searchText',{
+      method:'POST',
+      headers:{
+        'Content-Type':'application/json',
+        'X-Goog-Api-Key':GOOGLE_PLACES_KEY,
+        'X-Goog-FieldMask':'places.photos,places.displayName'
+      },
+      body:JSON.stringify({textQuery:query,maxResultCount:1})
+    });
+    if(!res.ok) throw new Error('places '+res.status);
+    const data=await res.json();
+    const place=(data.places||[])[0];
+    const photoName=place&&place.photos&&place.photos[0]&&place.photos[0].name;
+    if(!photoName) throw new Error('no photo');
+    const url=`https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=900&key=${GOOGLE_PLACES_KEY}`;
+    photoCache[cacheKey]=url;
+    return url;
+  }catch(_){ photoCache[cacheKey]=null; return null; }
+}
+
+// Attach a photo of a SPECIFIC PLACE (hotel/restaurant) — tries Google Places first
+// since it returns a photo of that exact establishment, not just a generic stock photo.
+// If no key/no result, the element is simply left hidden (graceful, no broken-image icon).
+async function attachPlacePhoto(imgEl,placeQuery){
+  if(!imgEl||!placeQuery) return;
+  try{
+    const url=await fetchGooglePlacePhoto(placeQuery);
+    if(!url) return;
+    const probe=new Image();
+    probe.onload=()=>{ imgEl.src=url; imgEl.classList.add('loaded'); };
+    probe.onerror=()=>{};
+    probe.src=url;
+  }catch(_){}
+}
+
 async function fetchPhoto(query){
   if(!PEXELS_KEY||!query) return null;
   if(photoCache[query]!==undefined) return photoCache[query];
@@ -779,9 +793,6 @@ async function fetchPhoto(query){
   }catch(_){ photoCache[query]=null; return null; }
 }
 
-// Single entry point for every image on the page.
-// 1) Draw the SVG illustration immediately so nothing is ever blank.
-// 2) If a real photo is reachable, swap it in once it has fully loaded.
 async function attachImage(imgEl,query){
   if(!imgEl) return;
   const key=query||'travel';
@@ -850,6 +861,16 @@ document.getElementById('btnPer').addEventListener('click',()=>{
 
 // ── Date sync → days ──
 const sdEl=document.getElementById('startdate'),edEl=document.getElementById('enddate'),ndEl=document.getElementById('numdays');
+
+function todayStr(){
+  const d=new Date();
+  const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
+const TODAY=todayStr();
+sdEl.min=TODAY;
+edEl.min=TODAY;
+
 function syncDays(){
   if(sdEl.value&&edEl.value){
     const d=Math.round((new Date(edEl.value)-new Date(sdEl.value))/86400000)+1;
@@ -857,6 +878,8 @@ function syncDays(){
   }
 }
 sdEl.addEventListener('change',()=>{
+  // never allow a past start date, whether picked or typed
+  if(sdEl.value && sdEl.value<TODAY) sdEl.value=TODAY;
   // end date must be >= start date
   if(sdEl.value){
     edEl.min=sdEl.value;
@@ -865,6 +888,8 @@ sdEl.addEventListener('change',()=>{
   syncDays();
 });
 edEl.addEventListener('change',()=>{
+  // never allow a past end date either
+  if(edEl.value && edEl.value<TODAY) edEl.value=TODAY;
   // start date must be <= end date
   if(edEl.value){
     sdEl.max=edEl.value;
@@ -916,7 +941,10 @@ function bookingLink(dest,checkin,checkout,guests){
   return u;
 }
 function agodaLink(dest,checkin,checkout,guests){
-  return `https://www.agoda.com/search?query=${encodeURIComponent(dest)}&adults=${guests||2}`;
+  let u=`https://www.agoda.com/search?query=${encodeURIComponent(dest)}&adults=${guests||2}`;
+  if(checkin)u+=`&checkIn=${checkin}`;
+  if(checkout)u+=`&checkOut=${checkout}`;
+  return u;
 }
 function klookLink(dest){
   return `https://www.klook.com/th/search/result/?keyword=${encodeURIComponent(dest+' car rental')}`;
@@ -956,8 +984,8 @@ planBtn.addEventListener('click',async()=>{
 ตัวเลขบาท ไม่มีคอมมา รวมทุกคน ภาษาไทย กระชับ ห้ามขึ้นบรรทัดใหม่ใน string`;
 
   const dSys=`นักวางแผนทริปมือโปร ตอบ JSON เท่านั้น ห้าม code fence:
-{"days":[{"day":1,"date_label":"วันที่ 1","theme":"ธีม","img_keyword":"คำค้นรูปภาษาอังกฤษ 2-4 คำ = สถานที่เด่นของวันนั้น + ประเทศ เช่น Lake Tekapo New Zealand","schedule":[{"time":"เช้า","activity":"...","note":"..."},{"time":"บ่าย","activity":"...","note":"..."},{"time":"เย็น","activity":"...","note":"..."}],"restaurants":[{"meal":"มื้อเที่ยง","name":"...","note":"...","price":"฿฿"}]}]}
-activity/note สั้น 1 ประโยค ร้านอาหาร 1-2 ร้าน/วัน ห้ามขึ้นบรรทัดใหม่ใน string`;
+{"days":[{"day":1,"date_label":"วันที่ 1","theme":"ธีม","img_keyword":"คำค้นรูปภาษาอังกฤษ 2-4 คำ = สถานที่เด่นของวันนั้น + ประเทศ เช่น Lake Tekapo New Zealand","schedule":[{"time":"เช้า","activity":"...","note":"..."},{"time":"บ่าย","activity":"...","note":"..."},{"time":"เย็น","activity":"...","note":"..."}],"restaurants":[{"meal":"มื้อเที่ยง","name":"...","note":"...","price":"฿฿"}],"secret_pick":{"name":"ชื่อร้าน","area":"ย่าน","why":"เหตุผลว่าทำไมคนท้องถิ่นไปประจำ 1 ประโยค","price":"฿฿"}}]}
+activity/note สั้น 1 ประโยค ร้านอาหาร 1-2 ร้าน/วัน secret_pick ต้องเป็นร้านที่คนท้องถิ่นไปกินประจำจริงๆ ไม่ใช่ร้านดังในไกด์นักท่องเที่ยว ไม่ใช่ร้านเดียวกับที่อยู่ใน restaurants ถ้านึกร้านแบบนี้ไม่ออกจริงๆ ให้ omit secret_pick ไปเลยแทนที่จะเดา ห้ามขึ้นบรรทัดใหม่ใน string`;
 
   const bSys=`นักวางแผนทริปมือโปร ตอบ JSON เท่านั้น ห้าม code fence:
 {"flight":{"label":"ชื่อเที่ยวบินตามสไตล์ที่ผู้ใช้เลือก","airlines_code":["TG","QR"],"airlines_name":"Thai Airways / Qatar","pros":"ข้อดี 1 ประโยค","cons":"ข้อควรรู้ 1 ประโยค","depart_time":"~07:00","arrive_time":"~11:00","price_est":"฿X,XXX"},"hotels":[{"tier":"budget","name":"ชื่อโรงแรมจริงระดับประหยัด","area":"ย่าน","desc":"...","price_per_night":"~฿XXX"},{"tier":"mid","name":"ชื่อโรงแรมจริงระดับกลาง","area":"ย่าน","desc":"...","price_per_night":"~฿X,XXX"},{"tier":"luxury","name":"ชื่อโรงแรมจริงระดับหรู","area":"ย่าน","desc":"...","price_per_night":"~฿X,XXX"}],"car_rental":{"recommended":true,"desc":"สั้นๆ ไม่เกิน 2 ประโยค","cost":"~฿XXX/วัน"},"hotel_by_day":[{"day":1,"area":"ย่านที่พักคืนนี้","hotel_name":"ชื่อโรงแรม 1 ที่","price":"~฿XXX"}],"transit_by_day":[{"day":1,"options":[{"icon":"🚇","name":"วิธีเดินทาง","cost":"~฿XX","link_type":"12go"}]}]}
@@ -997,7 +1025,13 @@ activity/note สั้น 1 ประโยค ร้านอาหาร 1-2 
     // then rebuild exactly `numdays` cards in order — guarantees no duplicates and no gaps
     // even if the AI repeats or miscounts day numbers across batches.
     const dayMap={};
-    allDays.forEach(d=>{ if(d&&d.day) dayMap[d.day]=d; });
+    const dayScore={};
+    const scoreOf=d=>((d.schedule||[]).length*10)+((d.restaurants||[]).length*5)+((d.theme||'').length>0?1:0);
+    allDays.forEach(d=>{
+      if(!d||!d.day) return;
+      const s=scoreOf(d);
+      if(!(d.day in dayMap) || s>dayScore[d.day]){ dayMap[d.day]=d; dayScore[d.day]=s; }
+    });
     const mergedDays=[];
     for(let i=1;i<=numdays;i++){
       const fallbackTheme=themes[i-1]||{};
@@ -1031,7 +1065,18 @@ function renderTrip(trip){
 
   // ── Single flight (matches user's chosen style) ──
   const f=bk.flight||null;
-  const flightSearchUrl=`https://www.google.com/travel/flights?q=${encodeURIComponent('flights from Bangkok to '+dest)}`;
+  function fmtDateForQuery(dateStr){
+    if(!dateStr) return '';
+    const d=new Date(dateStr+'T00:00:00');
+    if(isNaN(d)) return '';
+    const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return `${months[d.getMonth()]} ${d.getDate()}`;
+  }
+  const depFmt=fmtDateForQuery(startD), retFmt=fmtDateForQuery(endD);
+  let flightQuery=`flights from Bangkok to ${dest}`;
+  if(depFmt) flightQuery+=` on ${depFmt}`;
+  if(retFmt) flightQuery+=` through ${retFmt}`;
+  const flightSearchUrl=`https://www.google.com/travel/flights?q=${encodeURIComponent(flightQuery)}`;
   let flightHtml='';
   if(f){
     const codes=f.airlines_code||[];
@@ -1065,6 +1110,7 @@ function renderTrip(trip){
     hotelHtml+=`
     <div class="hotel-card">
       <div class="hotel-tier">
+        <img class="hotel-thumb" data-place-query="${(h.name||'')+' '+dest}" alt="${h.name||''}">
         <div class="hotel-tier-badge ${tc}">${tl}</div>
         <div class="hotel-name">${h.name||''}</div>
         ${h.area?`<div style="font-size:12px;color:rgba(255,255,255,0.45);margin-bottom:4px">📍 ${h.area}</div>`:''}
@@ -1178,6 +1224,14 @@ function renderTrip(trip){
             </div>`).join('')}
           </div>
         </div>`:''}
+        ${d.secret_pick&&d.secret_pick.name?`
+        <div class="secret-pick">
+          <div class="secret-pick-label">🤫 ร้านลับคนท้องถิ่น</div>
+          ${d.secret_pick.price?`<div class="secret-pick-price">${d.secret_pick.price}</div>`:''}
+          <div class="secret-pick-name">${d.secret_pick.name}</div>
+          ${d.secret_pick.area?`<div class="secret-pick-area">📍 ${d.secret_pick.area}</div>`:''}
+          ${d.secret_pick.why?`<div class="secret-pick-why">"${d.secret_pick.why}"</div>`:''}
+        </div>`:''}
         ${(d.transit||[]).length?`
         <div class="day-transit">
           <div class="day-transit-label">🚌 การเดินทางวันนี้</div>
@@ -1218,6 +1272,7 @@ function renderTrip(trip){
   const bannerImg=document.getElementById('bannerImg');
   attachImage(bannerImg,destEn);
   document.querySelectorAll('.day-img').forEach(img=>attachImage(img,img.dataset.query));
+  document.querySelectorAll('.hotel-thumb').forEach(img=>attachPlacePhoto(img,img.dataset.placeQuery));
 }
 
 
