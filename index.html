@@ -527,17 +527,27 @@ async function callAPI(sys,usr,maxTokens=4096,attempt=1){
   // identically, which was the previous bug).
   if(r.status===429){
     if(attempt<4){
-      const waitMs=attempt*5000; // 5s, 10s, 15s — gives the per-minute quota room to reset
+      const waitMs=attempt*15000; // 15s, 30s, 45s
       const el=document.getElementById('lmsg');
       if(el)el.textContent=`🦉 AI ยุ่งนิดหน่อย รอสักครู่แล้วลองใหม่ (${Math.round(waitMs/1000)} วิ)...`;
       await sleep(waitMs);
       return callAPI(sys,usr,maxTokens,attempt+1);
     }
-    throw new Error('โควตา AI เต็มชั่วคราว (429) ลองใหม่อีกครั้งในอีกสักครู่');
   }
 
-  const d=await r.json();
-  const raw=(d.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n');
+  let d;
+  const rawBody=await r.text();
+  try{ d=JSON.parse(rawBody); }catch(_){ d=null; }
+
+  // Any non-200 status: surface the REAL reason instead of letting it fall
+  // through to a generic "no JSON found" error that hides what actually
+  // went wrong (wrong key, quota, project misconfig, etc.)
+  if(!r.ok){
+    const detail = d?.error?.message || d?.message || d?.error || rawBody.slice(0,200) || `HTTP ${r.status}`;
+    throw new Error(`[${r.status}] ${detail}`);
+  }
+
+  const raw=(d?.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n');
   try{return extractJSON(raw)}catch(e){
     if(attempt<2)return callAPI(sys,usr,maxTokens,attempt+1);
     throw e;
@@ -936,7 +946,7 @@ seasonBtn.addEventListener('click',async()=>{
     const cls=adv.status==='recommended'?'recommended':adv.status==='caution'?'caution':'mixed';
     const icon=cls==='recommended'?'✅ แนะนำ':cls==='caution'?'⚠️ ควรระวัง':'◐ ปนๆกัน';
     advBox.innerHTML=`<div class="advisory ${cls}"><div class="advisory-head">${icon} — ${adv.headline||''}</div>${adv.weather?`<div>🌤 ${adv.weather}</div>`:''}${(adv.highlights||[]).length?`<div style="margin-top:6px"><b>น่าเที่ยว:</b><ul>${adv.highlights.map(h=>`<li>${h}</li>`).join('')}</ul></div>`:''}${(adv.watch_out||[]).length?`<div style="margin-top:6px"><b>ควรระวัง:</b><ul>${adv.watch_out.map(h=>`<li>${h}</li>`).join('')}</ul></div>`:''}</div>`;
-  }catch(e){advBox.innerHTML=`<div class="advisory mixed"><div class="advisory-head">⚠ เช็คไม่สำเร็จ</div>ลองกดใหม่ครับ</div>`}
+  }catch(e){advBox.innerHTML=`<div class="advisory mixed"><div class="advisory-head">⚠ เช็คไม่สำเร็จ</div><div style="font-size:11.5px;opacity:0.8;word-break:break-all;margin-top:4px">${(e.message||String(e)).slice(0,300)}</div></div>`}
   finally{seasonBtn.disabled=false;seasonBtn.innerHTML='🦉 ให้นกฮูกเช็คว่าช่วงนี้เที่ยวดีไหม'}
 });
 
@@ -1031,14 +1041,15 @@ activity/note สั้น 1 ประโยค ร้านอาหาร 1-2 
     // Phase 2: day details
     const themes=(ov.day_themes||[]).slice(0,numdays);
     while(themes.length<numdays)themes.push({day:themes.length+1,date_label:`วันที่ ${themes.length+1}`,theme:'',img_keyword:destEn});
-    const BATCH=3,allDays=[];
+    const BATCH=6,allDays=[];
     for(let i=0;i<themes.length;i+=BATCH){
       const batch=themes.slice(i,i+BATCH);
       const el=document.getElementById('lmsg');
       if(el)el.textContent=`🦉 กำลังจัดวันที่ ${batch[0].day}–${batch[batch.length-1].day}...`;
       const bPrompt=`${ctx}\nปลายทาง:${dest}\nจัดรายละเอียดวัน:\n${batch.map(t=>`วันที่${t.day}(${t.date_label})ธีม:${t.theme}`).join('\n')}`;
-      const res=await callAPI(dSys,bPrompt,3000);
+      const res=await callAPI(dSys,bPrompt,6000);
       (res.days||[]).forEach(d=>allDays.push(d));
+      if(i+BATCH<themes.length) await sleep(1200); // small gap between calls to avoid bursting the per-minute limit
     }
 
     // Phase 3: booking info (parallel with last batch finishing)
@@ -1075,7 +1086,7 @@ activity/note สั้น 1 ประโยค ร้านอาหาร 1-2 
     });
   }catch(e){
     clearInterval(lt);
-    resultsEl.innerHTML=`<div class="empty-state"><span class="big-owl">😅</span><p>นกฮูกสับสนนิดนึง<br>ลองกดใหม่อีกครั้งนะครับ</p></div>`;
+    resultsEl.innerHTML=`<div class="empty-state"><span class="big-owl">😅</span><p>นกฮูกสับสนนิดนึง<br>ลองกดใหม่อีกครั้งนะครับ</p><p style="font-size:11px;opacity:0.6;margin-top:10px;word-break:break-all;max-width:400px">${(e.message||String(e)).slice(0,300)}</p></div>`;
     console.error(e);
   }finally{planBtn.disabled=false;planBtn.innerHTML='<span class="cta-owl">🦉</span> ให้นกฮูกจัดทริป!'}
 });
@@ -1102,7 +1113,7 @@ function renderTrip(trip){
     return `${months[d.getMonth()]} ${d.getDate()}`;
   }
   const depFmt=fmtDateForQuery(startD), retFmt=fmtDateForQuery(endD);
-  let flightQuery=`flights from Bangkok to ${dest}`;
+  let flightQuery=`flights from ${origin} to ${dest}`;
   if(depFmt) flightQuery+=` on ${depFmt}`;
   if(retFmt) flightQuery+=` through ${retFmt}`;
   const flightSearchUrl=`https://www.google.com/travel/flights?q=${encodeURIComponent(flightQuery)}`;
