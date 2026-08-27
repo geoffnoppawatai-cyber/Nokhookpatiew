@@ -1037,6 +1037,7 @@ activity/note สั้น 1 ประโยค ร้านอาหาร 1-2 
     const destEn=ov.destination_en||dest;
     const airportCode=ov.dest_airport_code||'';
     loadBgImg(destEn);
+    await sleep(1500); // space out from phase 1 so phase 2 doesn't burst the per-minute limit
 
     // Phase 2: day details
     const themes=(ov.day_themes||[]).slice(0,numdays);
@@ -1049,10 +1050,11 @@ activity/note สั้น 1 ประโยค ร้านอาหาร 1-2 
       const bPrompt=`${ctx}\nปลายทาง:${dest}\nจัดรายละเอียดวัน:\n${batch.map(t=>`วันที่${t.day}(${t.date_label})ธีม:${t.theme}`).join('\n')}`;
       const res=await callAPI(dSys,bPrompt,6000);
       (res.days||[]).forEach(d=>allDays.push(d));
-      if(i+BATCH<themes.length) await sleep(1200); // small gap between calls to avoid bursting the per-minute limit
+      if(i+BATCH<themes.length) await sleep(1500); // gap between multiple day-batch calls too
     }
+    await sleep(1500); // space out from phase 2 so phase 3 doesn't burst the per-minute limit
 
-    // Phase 3: booking info (parallel with last batch finishing)
+    // Phase 3: booking info
     const el2=document.getElementById('lmsg');
     if(el2)el2.textContent='✈️ กำลังหา flight options & ที่พัก...';
     const booking=await callAPI(bSys,`${ctx}\nปลายทาง:${dest}\nแนะนำตัวเลือกเที่ยวบิน ที่พัก และการเดินทางในประเทศ`,2500);
