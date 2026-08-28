@@ -1027,6 +1027,14 @@ function tripComLink(dest,checkin,checkout,guests){
   if(checkout)u+=`&checkOut=${checkout}`;
   return u;
 }
+function tripComFlightLink(originCode,destCode,depDate,retDate,guests){
+  const from=(originCode||'bkk').toLowerCase(), to=(destCode||'').toLowerCase();
+  let u=`https://www.trip.com/flights/showfarefirst?dcity=${from}&acity=${to}`;
+  if(depDate)u+=`&ddate=${depDate}`;
+  if(retDate){ u+=`&rdate=${retDate}&triptype=rt`; } else { u+=`&triptype=ow`; }
+  u+=`&class=y&lowpricesource=searchform&quantity=${guests||1}&nonstoponly=off&locale=th-TH&curr=THB`;
+  return u;
+}
 function klookLink(dest,date){
   let u=`https://www.klook.com/th/search/result/?keyword=${encodeURIComponent(dest+' car rental')}`;
   if(date)u+=`&date=${date}`; // best-effort — Klook's search may not honor this, hence the visible date label next to the link
@@ -1276,11 +1284,18 @@ function renderTrip(trip){
     const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     return `${months[d.getMonth()]} ${d.getDate()}`;
   }
+  // Google Flights parses airport codes far more reliably than free-text city
+  // names, so use them whenever we have them instead of the raw text.
+  const ORIGIN_AIRPORT_CODES={'กรุงเทพฯ':'BKK','กรุงเทพ':'BKK','bangkok':'BKK','เชียงใหม่':'CNX','chiang mai':'CNX',
+    'ภูเก็ต':'HKT','phuket':'HKT','เชียงราย':'CEI','หาดใหญ่':'HDY','อุดรธานี':'UTH','ขอนแก่น':'KKC'};
+  const originCode=ORIGIN_AIRPORT_CODES[(origin||'').trim().toLowerCase()]||ORIGIN_AIRPORT_CODES[(origin||'').trim()]||origin;
+  const destForQuery=airCode||dest;
   const depFmt=fmtDateForQuery(startD), retFmt=fmtDateForQuery(endD);
-  let flightQuery=`flights from ${origin} to ${dest}`;
+  let flightQuery=`flights from ${originCode} to ${destForQuery}`;
   if(depFmt) flightQuery+=` on ${depFmt}`;
   if(retFmt) flightQuery+=` through ${retFmt}`;
   const flightSearchUrl=`https://www.google.com/travel/flights?q=${encodeURIComponent(flightQuery)}`;
+  const tripFlightUrl=tripComFlightLink(originCode,airCode||destForQuery,startD,endD,travelers);
   let flightHtml='';
   if(f&&(f.label||f.airlines_name)){
     const codes=f.airlines_code||[];
@@ -1297,14 +1312,20 @@ function renderTrip(trip){
         <div class="pros-box">${f.pros||''}</div>
         <div class="cons-box">${f.cons||''}</div>
       </div>
-      <a class="book-btn sky" href="${flightSearchUrl}" target="_blank" rel="noopener">🔍 ค้นหาตั๋วบน Google Flights</a>
+      <div style="display:flex;gap:8px;margin-top:4px">
+        <a class="book-btn sky" href="${flightSearchUrl}" target="_blank" rel="noopener" style="flex:1">🔍 Google Flights</a>
+        <a class="book-btn tripcom" href="${tripFlightUrl}" target="_blank" rel="noopener" style="flex:1;text-align:center">Trip.com</a>
+      </div>
     </div>`;
   } else {
     // AI didn't return flight details this time — still give a usable search link instead of nothing
     flightHtml=`
     <div class="flight-card" style="max-width:560px">
       <div class="flight-name">ยังไม่มีคำแนะนำเที่ยวบินเฉพาะ ลองค้นหาเองได้เลย</div>
-      <a class="book-btn sky" href="${flightSearchUrl}" target="_blank" rel="noopener" style="margin-top:12px">🔍 ค้นหาตั๋วบน Google Flights</a>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <a class="book-btn sky" href="${flightSearchUrl}" target="_blank" rel="noopener" style="flex:1">🔍 Google Flights</a>
+        <a class="book-btn tripcom" href="${tripFlightUrl}" target="_blank" rel="noopener" style="flex:1;text-align:center">Trip.com</a>
+      </div>
     </div>`;
   }
 
