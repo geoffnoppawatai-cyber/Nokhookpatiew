@@ -198,6 +198,7 @@ nav{position:relative;z-index:10;display:flex;align-items:center;justify-content
 .book-btn.booking{background:#003580;color:#fff}
 .book-btn.booking:hover{background:#002560}
 .book-btn.agoda{background:#E91E8C;color:#fff}
+.book-btn.tripcom{background:#287DFA;color:#fff}
 .book-btn.agoda:hover{background:#c0176f}
 .book-btn.klook{background:#FF5722;color:#fff}
 .book-btn.klook:hover{background:#e64a19}
@@ -277,7 +278,8 @@ nav{position:relative;z-index:10;display:flex;align-items:center;justify-content
 .day-hotel-btns{display:flex;gap:6px;flex-shrink:0}
 .day-hotel-btns a{font-size:11px;padding:6px 10px;border-radius:8px;text-decoration:none;font-weight:700;white-space:nowrap}
 .day-hotel-btns .hb{background:#003580;color:#fff}
-.day-hotel-btns .ha{background:#E91E8C;color:#fff}</style>
+.day-hotel-btns .ha{background:#E91E8C;color:#fff}
+.day-hotel-btns .ht{background:#287DFA;color:#fff}</style>
 </head>
 <body>
 
@@ -952,6 +954,44 @@ seasonBtn.addEventListener('click',async()=>{
 
 // ── Generate trip ──
 const planBtn=document.getElementById('planBtn'),resultsEl=document.getElementById('results');
+
+// ── Share-link feature: encode the rendered trip into the URL so it can be
+// reopened by anyone without calling the AI again (no server storage needed) ──
+let lastTrip=null;
+function b64EncodeUnicode(str){
+  return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g,(m,p1)=>String.fromCharCode('0x'+p1)));
+}
+function b64DecodeUnicode(str){
+  return decodeURIComponent(atob(str).split('').map(c=>'%'+('00'+c.charCodeAt(0).toString(16)).slice(-2)).join(''));
+}
+function getShareLink(){
+  const encoded=b64EncodeUnicode(JSON.stringify(lastTrip));
+  return `${location.origin}${location.pathname}#trip=${encoded}`;
+}
+async function shareTrip(){
+  const link=getShareLink();
+  try{
+    await navigator.clipboard.writeText(link);
+    const btn=document.getElementById('shareBtn');
+    if(btn){ const old=btn.textContent; btn.textContent='✅ คัดลอกลิงก์แล้ว!'; setTimeout(()=>btn.textContent=old,2000); }
+  }catch(_){
+    prompt('คัดลอกลิงก์นี้เพื่อแชร์:',link);
+  }
+}
+function loadSharedTripIfPresent(){
+  const m=location.hash.match(/#trip=(.+)$/);
+  if(!m) return false;
+  try{
+    const trip=JSON.parse(b64DecodeUnicode(decodeURIComponent(m[1])));
+    renderTrip(trip);
+    resultsEl.scrollIntoView({behavior:'smooth'});
+    return true;
+  }catch(e){
+    console.error('โหลดทริปที่แชร์มาไม่สำเร็จ',e);
+    return false;
+  }
+}
+window.addEventListener('DOMContentLoaded',loadSharedTripIfPresent);
 const loadingMsgs=['🦉 นกฮูกกำลังมองหาปลายทาง...','🗺 กำลังวางแผนเส้นทาง...','🍜 กำลังเลือกร้านอาหาร...','🏨 กำลังดูตัวเลือกที่พัก...','✈️ กำลังหา flight options...','🚌 กำลังดูการเดินทางในประเทศ...'];
 
 // ── Deep link builders ──
@@ -979,6 +1019,12 @@ function agodaLink(dest,checkin,checkout,guests){
     const nights=Math.max(1,Math.round((new Date(checkout)-new Date(checkin))/86400000));
     u+=`&los=${nights}`;
   }
+  return u;
+}
+function tripComLink(dest,checkin,checkout,guests){
+  let u=`https://www.trip.com/hotels/list?searchType=CT&searchValue=${encodeURIComponent(dest)}&crn=1&adult=${guests||2}`;
+  if(checkin)u+=`&checkIn=${checkin}`;
+  if(checkout)u+=`&checkOut=${checkout}`;
   return u;
 }
 function klookLink(dest,date){
@@ -1080,18 +1126,72 @@ activity/note สั้น 1 ประโยค ร้านอาหาร 1-2 
       const d=dayMap[i]||{day:i,date_label:fallbackTheme.date_label||`วันที่ ${i}`,theme:fallbackTheme.theme||'',schedule:[],restaurants:[]};
       mergedDays.push({...d,day:i,transit:transitMap[i]||[]});
     }
-    renderTrip({
+    lastTrip={
       trip_title:ov.trip_title,destination:dest,destination_en:destEn,
       summary:ov.summary,budget_breakdown:ov.budget_breakdown,
       days:mergedDays,
       booking,origin,startD,endD,travelers,airportCode
-    });
+    };
+    renderTrip(lastTrip);
   }catch(e){
     clearInterval(lt);
     resultsEl.innerHTML=`<div class="empty-state"><span class="big-owl">😅</span><p>นกฮูกสับสนนิดนึง<br>ลองกดใหม่อีกครั้งนะครับ</p><p style="font-size:11px;opacity:0.6;margin-top:10px;word-break:break-all;max-width:400px">${(e.message||String(e)).slice(0,300)}</p></div>`;
     console.error(e);
   }finally{planBtn.disabled=false;planBtn.innerHTML='<span class="cta-owl">🦉</span> ให้นกฮูกจัดทริป!'}
 });
+
+function printVisaDoc(){
+  if(!lastTrip) return;
+  const t=lastTrip;
+  const hotelByDayName={};
+  (t.booking?.hotel_by_day||[]).forEach(hd=>{ if(hd.day) hotelByDayName[hd.day]=hd.hotel_name||''; });
+
+  const rows=(t.days||[]).map(d=>{
+    const activities=(d.schedule||[]).map(s=>`<b>${s.time||''}:</b> ${s.activity||''}`).join('<br>');
+    return `<tr>
+      <td>${d.day}</td>
+      <td>${d.date_label||''}</td>
+      <td>${hotelByDayName[d.day]||'-'}</td>
+      <td>${activities||'-'}</td>
+    </tr>`;
+  }).join('');
+
+  const doc=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Travel Itinerary — ${t.trip_title||''}</title>
+  <style>
+    body{font-family:'Sarabun','Segoe UI',Arial,sans-serif;color:#111;padding:40px;max-width:800px;margin:0 auto;line-height:1.5}
+    h1{font-size:22px;margin-bottom:4px}
+    .meta{color:#555;font-size:13px;margin-bottom:24px}
+    .meta div{margin-bottom:2px}
+    table{width:100%;border-collapse:collapse;margin-top:16px}
+    th,td{border:1px solid #ccc;padding:8px 10px;font-size:12.5px;text-align:left;vertical-align:top}
+    th{background:#f2f2f2;font-weight:700}
+    .footer{margin-top:30px;font-size:11px;color:#888;border-top:1px solid #ddd;padding-top:10px}
+    @media print{ body{padding:0} }
+  </style></head>
+  <body>
+    <h1>แผนการเดินทาง / Travel Itinerary</h1>
+    <div class="meta">
+      <div><b>ชื่อทริป / Title:</b> ${t.trip_title||''}</div>
+      <div><b>ปลายทาง / Destination:</b> ${t.destination||''}</div>
+      <div><b>ช่วงเวลา / Duration:</b> ${t.startD||''} – ${t.endD||''}</div>
+      <div><b>จำนวนผู้เดินทาง / Travelers:</b> ${t.travelers||''}</div>
+    </div>
+    <table>
+      <thead><tr><th>วัน / Day</th><th>วันที่ / Date</th><th>ที่พัก / Accommodation</th><th>กิจกรรม / Activities</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="footer">
+      สร้างโดย นกฮูกพาเที่ยว (Nokhookpatiew) — เอกสารนี้เป็นแผนการเดินทางโดยประมาณ จัดทำเพื่อใช้ประกอบการยื่นเอกสาร ไม่ใช่การยืนยันการจองที่มีผลผูกพัน กรุณาตรวจสอบและยืนยันการจองจริงก่อนเดินทาง
+    </div>
+  </body></html>`;
+
+  const w=window.open('','_blank');
+  if(!w){ alert('เบราว์เซอร์บล็อกป๊อปอัพ กรุณาอนุญาตแล้วลองใหม่'); return; }
+  w.document.write(doc);
+  w.document.close();
+  w.onload=()=>w.print();
+}
+
 
 function renderTrip(trip){
   const b=trip.budget_breakdown||{};
@@ -1156,6 +1256,7 @@ function renderTrip(trip){
     const tl=tierLabel[h.tier]||h.tier||'';
     const bUrl=bookingLink(h.name+' '+dest,startD,endD,travelers);
     const aUrl=agodaLink(h.name+' '+dest,startD,endD,travelers);
+    const tUrl=tripComLink(h.name+' '+dest,startD,endD,travelers);
     hotelHtml+=`
     <div class="hotel-card">
       <div class="hotel-tier">
@@ -1169,6 +1270,7 @@ function renderTrip(trip){
       <div class="hotel-btns">
         <a class="book-btn booking" href="${bUrl}" target="_blank" rel="noopener">Booking.com</a>
         <a class="book-btn agoda" href="${aUrl}" target="_blank" rel="noopener">Agoda</a>
+        <a class="book-btn tripcom" href="${tUrl}" target="_blank" rel="noopener">Trip.com</a>
       </div>
     </div>`;
   });
@@ -1205,6 +1307,7 @@ function renderTrip(trip){
       price:hd.price||'',
       bUrl:bookingLink(searchName+' '+dest,cin,cout,travelers),
       aUrl:agodaLink(searchName+' '+dest,cin,cout,travelers),
+      tUrl:tripComLink(searchName+' '+dest,cin,cout,travelers),
     };
   });
 
@@ -1218,6 +1321,8 @@ function renderTrip(trip){
         <div class="trip-title">${trip.trip_title||'ทริปของคุณ'}</div>
         <div class="trip-summary">${trip.summary||''}</div>
       </div>
+      <button id="shareBtn" onclick="shareTrip()" style="position:absolute;top:16px;right:190px;z-index:2;background:rgba(0,0,0,0.45);backdrop-filter:blur(6px);color:#fff;border:1px solid rgba(255,255,255,0.3);border-radius:999px;padding:9px 16px;font-size:13px;font-weight:700;cursor:pointer">🔗 แชร์ทริปนี้</button>
+      <button id="visaBtn" onclick="printVisaDoc()" style="position:absolute;top:16px;right:16px;z-index:2;background:rgba(0,0,0,0.45);backdrop-filter:blur(6px);color:#fff;border:1px solid rgba(255,255,255,0.3);border-radius:999px;padding:9px 16px;font-size:13px;font-weight:700;cursor:pointer">🦉 นกฮูกช่วยยื่นวีซ่า</button>
     </div>
     <div class="budget-strip">
       ${pills.map(([l,v])=>`<div class="budget-pill"><div class="lbl">${l}</div><div class="val">฿${fmtTHB(v)}</div></div>`).join('')}
@@ -1310,6 +1415,7 @@ function renderTrip(trip){
           <div class="day-hotel-btns">
             <a class="hb" href="${hotelByDay[d.day].bUrl}" target="_blank" rel="noopener">Booking</a>
             <a class="ha" href="${hotelByDay[d.day].aUrl}" target="_blank" rel="noopener">Agoda</a>
+            <a class="ht" href="${hotelByDay[d.day].tUrl}" target="_blank" rel="noopener">Trip.com</a>
           </div>
         </div>`:''}
       </div>
